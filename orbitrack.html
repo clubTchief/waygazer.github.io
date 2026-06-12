@@ -1,0 +1,732 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ORBITRACK — Satellite Pass & Ground Track Predictor</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/satellite.js/4.1.4/satellite.min.js"></script>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+:root{
+  --bg:#0A0E17;
+  --panel:#141B2A;
+  --panel-2:#1B2434;
+  --line:#26324A;
+  --text:#E8ECF2;
+  --text-dim:#8B96A8;
+  --green:#5EFFB0;
+  --amber:#FFB454;
+  --red:#FF6B6B;
+  --blue:#6FA8FF;
+  --mono:'IBM Plex Mono',monospace;
+  --sans:'Inter',sans-serif;
+}
+*{margin:0;padding:0;box-sizing:border-box;}
+html,body{background:var(--bg);color:var(--text);font-family:var(--sans);-webkit-font-smoothing:antialiased;}
+body{min-height:100vh;}
+
+/* ===== Header ===== */
+header{
+  border-bottom:1px solid var(--line);
+  padding:18px 28px;
+  display:flex;align-items:center;justify-content:space-between;
+  flex-wrap:wrap;gap:12px;
+  background:linear-gradient(180deg,#0D1320 0%,#0A0E17 100%);
+}
+.brand{display:flex;align-items:baseline;gap:12px;}
+.brand h1{
+  font-family:var(--mono);font-weight:700;font-size:1.35rem;letter-spacing:0.12em;
+  color:var(--text);
+}
+.brand h1 span{color:var(--green);}
+.brand .tag{font-size:0.78rem;color:var(--text-dim);font-family:var(--mono);letter-spacing:0.06em;}
+.clock{
+  font-family:var(--mono);font-size:0.92rem;color:var(--green);
+  background:var(--panel);border:1px solid var(--line);padding:8px 14px;border-radius:4px;
+  letter-spacing:0.05em;
+}
+.clock .label{color:var(--text-dim);margin-right:8px;font-size:0.75rem;}
+
+/* ===== Layout ===== */
+.app{
+  display:grid;
+  grid-template-columns: 320px 1fr 340px;
+  gap:1px;
+  background:var(--line);
+  min-height:calc(100vh - 73px);
+}
+@media (max-width:1100px){
+  .app{grid-template-columns:1fr;}
+}
+.panel{background:var(--bg);padding:20px;}
+.panel-header{
+  font-family:var(--mono);font-size:0.72rem;letter-spacing:0.16em;text-transform:uppercase;
+  color:var(--text-dim);margin-bottom:14px;display:flex;align-items:center;gap:8px;
+}
+.panel-header::before{
+  content:'';display:block;width:6px;height:6px;background:var(--green);border-radius:50%;
+  box-shadow:0 0 8px var(--green);
+}
+
+/* ===== Controls ===== */
+.field{margin-bottom:16px;}
+.field label{
+  display:block;font-size:0.78rem;color:var(--text-dim);margin-bottom:6px;
+  font-family:var(--mono);letter-spacing:0.04em;
+}
+select,input{
+  width:100%;background:var(--panel);border:1px solid var(--line);color:var(--text);
+  padding:10px 12px;border-radius:4px;font-family:var(--mono);font-size:0.88rem;
+  transition:border-color .15s;
+}
+select:focus,input:focus{outline:none;border-color:var(--green);}
+select{cursor:pointer;}
+.row2{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+.field-note{font-size:0.72rem;color:var(--text-dim);margin-top:5px;font-family:var(--mono);}
+
+.btn{
+  width:100%;padding:11px;border-radius:4px;border:1px solid var(--green);
+  background:transparent;color:var(--green);font-family:var(--mono);font-size:0.82rem;
+  letter-spacing:0.1em;text-transform:uppercase;cursor:pointer;font-weight:600;
+  transition:all .15s;margin-top:4px;
+}
+.btn:hover{background:var(--green);color:#06120C;}
+.btn-secondary{border-color:var(--line);color:var(--text-dim);}
+.btn-secondary:hover{background:var(--panel-2);color:var(--text);border-color:var(--text-dim);}
+
+/* ===== Telemetry ===== */
+.telemetry-grid{
+  display:grid;grid-template-columns:1fr 1fr;gap:1px;background:var(--line);
+  border:1px solid var(--line);border-radius:4px;overflow:hidden;margin-top:6px;
+}
+.tele-cell{background:var(--panel);padding:11px 13px;}
+.tele-cell .k{font-size:0.68rem;color:var(--text-dim);font-family:var(--mono);letter-spacing:0.08em;text-transform:uppercase;}
+.tele-cell .v{font-size:1.02rem;font-family:var(--mono);font-weight:600;color:var(--text);margin-top:3px;}
+.tele-cell .v.green{color:var(--green);}
+.tele-cell .v.amber{color:var(--amber);}
+.tele-cell .v.blue{color:var(--blue);}
+
+/* ===== Map ===== */
+#map{
+  width:100%;height:420px;border-radius:4px;border:1px solid var(--line);
+  background:#0D1320;
+}
+.map-wrap{position:relative;}
+.leaflet-container{background:#0D1320;font-family:var(--mono);}
+
+/* ===== Sky view (signature element) ===== */
+.skyview-wrap{
+  display:flex;flex-direction:column;align-items:center;
+}
+#skyview{display:block;}
+.skyview-legend{
+  display:flex;gap:18px;margin-top:10px;font-size:0.72rem;color:var(--text-dim);
+  font-family:var(--mono);flex-wrap:wrap;justify-content:center;
+}
+.legend-dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:5px;vertical-align:middle;}
+
+/* ===== Pass table ===== */
+.pass-table{width:100%;border-collapse:collapse;font-family:var(--mono);font-size:0.78rem;margin-top:10px;}
+.pass-table th{
+  text-align:left;color:var(--text-dim);font-weight:500;padding:8px 6px;
+  border-bottom:1px solid var(--line);font-size:0.68rem;letter-spacing:0.08em;text-transform:uppercase;
+}
+.pass-table td{padding:9px 6px;border-bottom:1px solid #1A2233;color:var(--text);}
+.pass-table tr:hover td{background:var(--panel);}
+.pass-table tr.active td{background:rgba(94,255,176,0.06);}
+.quality-tag{
+  font-size:0.65rem;padding:2px 7px;border-radius:3px;font-weight:600;letter-spacing:0.06em;
+}
+.q-good{background:rgba(94,255,176,0.15);color:var(--green);}
+.q-fair{background:rgba(255,180,84,0.15);color:var(--amber);}
+.q-poor{background:rgba(139,150,168,0.15);color:var(--text-dim);}
+
+/* ===== Empty state ===== */
+.empty{
+  padding:30px 10px;text-align:center;color:var(--text-dim);font-size:0.85rem;
+  border:1px dashed var(--line);border-radius:4px;font-family:var(--mono);
+}
+
+/* ===== Footer ===== */
+footer{
+  border-top:1px solid var(--line);padding:16px 28px;font-size:0.74rem;color:var(--text-dim);
+  font-family:var(--mono);display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;
+}
+footer a{color:var(--blue);text-decoration:none;}
+footer a:hover{text-decoration:underline;}
+
+/* scrollbars */
+::-webkit-scrollbar{width:8px;height:8px;}
+::-webkit-scrollbar-track{background:var(--bg);}
+::-webkit-scrollbar-thumb{background:var(--line);border-radius:4px;}
+
+.pulse{
+  display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--green);
+  box-shadow:0 0 0 0 rgba(94,255,176,0.6);
+  animation:pulse 2s infinite;
+}
+@keyframes pulse{
+  0%{box-shadow:0 0 0 0 rgba(94,255,176,0.5);}
+  70%{box-shadow:0 0 0 8px rgba(94,255,176,0);}
+  100%{box-shadow:0 0 0 0 rgba(94,255,176,0);}
+}
+
+.status-line{display:flex;align-items:center;gap:8px;font-family:var(--mono);font-size:0.78rem;color:var(--text-dim);margin-bottom:14px;}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="brand">
+    <h1>ORBI<span>TRACK</span></h1>
+    <div class="tag">SATELLITE PASS &amp; GROUND TRACK PREDICTOR</div>
+  </div>
+  <div class="clock"><span class="label">UTC</span><span id="utcClock">--:--:--</span></div>
+</header>
+
+<div class="app">
+
+  <!-- LEFT: CONTROLS -->
+  <div class="panel">
+    <div class="panel-header">Configuration</div>
+
+    <div class="field">
+      <label>Satellite</label>
+      <select id="satSelect"></select>
+      <div class="field-note" id="tleAge">TLE epoch: —</div>
+    </div>
+
+    <div class="field">
+      <label>Observer location</label>
+      <select id="locPreset">
+        <option value="powai">Powai Lake, Mumbai</option>
+        <option value="custom">Custom coordinates…</option>
+      </select>
+    </div>
+
+    <div class="field" id="customCoordsField" style="display:none;">
+      <div class="row2">
+        <div>
+          <label>Latitude (°)</label>
+          <input type="number" id="latInput" value="19.1280" step="0.0001">
+        </div>
+        <div>
+          <label>Longitude (°)</label>
+          <input type="number" id="lonInput" value="72.9100" step="0.0001">
+        </div>
+      </div>
+      <div class="field-note">Default: Powai Lake (19.1280° N, 72.9100° E)</div>
+    </div>
+
+    <div class="field">
+      <label>Minimum pass elevation (°)</label>
+      <input type="number" id="minElev" value="10" min="0" max="89">
+      <div class="field-note">Passes peaking below this angle are excluded</div>
+    </div>
+
+    <div class="field">
+      <label>Forecast window</label>
+      <select id="forecastDays">
+        <option value="1">Next 24 hours</option>
+        <option value="3" selected>Next 3 days</option>
+        <option value="7">Next 7 days</option>
+      </select>
+    </div>
+
+    <button class="btn" id="computeBtn">Compute passes</button>
+
+    <div class="panel-header" style="margin-top:28px;">Live telemetry</div>
+    <div class="status-line"><span class="pulse"></span> Propagating from current TLE</div>
+    <div class="telemetry-grid" id="telemetry">
+      <div class="tele-cell"><div class="k">Latitude</div><div class="v green" id="t-lat">—</div></div>
+      <div class="tele-cell"><div class="k">Longitude</div><div class="v green" id="t-lon">—</div></div>
+      <div class="tele-cell"><div class="k">Altitude</div><div class="v" id="t-alt">—</div></div>
+      <div class="tele-cell"><div class="k">Velocity</div><div class="v" id="t-vel">—</div></div>
+      <div class="tele-cell"><div class="k">Inclination</div><div class="v blue" id="t-inc">—</div></div>
+      <div class="tele-cell"><div class="k">Eccentricity</div><div class="v blue" id="t-ecc">—</div></div>
+      <div class="tele-cell"><div class="k">Period</div><div class="v" id="t-period">—</div></div>
+      <div class="tele-cell"><div class="k">Range to obs.</div><div class="v amber" id="t-range">—</div></div>
+    </div>
+  </div>
+
+  <!-- CENTER: MAP -->
+  <div class="panel">
+    <div class="panel-header">Ground track — live position &amp; orbit path</div>
+    <div class="map-wrap">
+      <div id="map"></div>
+    </div>
+
+    <div class="panel-header" style="margin-top:24px;">Upcoming passes over observer</div>
+    <div id="passContainer">
+      <div class="empty">Select a satellite and click "Compute passes"</div>
+    </div>
+  </div>
+
+  <!-- RIGHT: SKY VIEW -->
+  <div class="panel">
+    <div class="panel-header">Sky view — selected pass</div>
+    <div class="skyview-wrap">
+      <svg id="skyview" width="280" height="280" viewBox="0 0 280 280"></svg>
+      <div class="skyview-legend">
+        <div><span class="legend-dot" style="background:var(--green);"></span>Path above horizon</div>
+        <div><span class="legend-dot" style="background:var(--amber);"></span>Max elevation</div>
+        <div><span class="legend-dot" style="background:var(--blue);"></span>Current position</div>
+      </div>
+    </div>
+    <div id="passDetail" style="margin-top:18px;font-family:var(--mono);font-size:0.82rem;color:var(--text-dim);">
+      Click a pass in the table to plot its track across the sky, from rise (horizon) to set (horizon), as seen from the observer's location.
+    </div>
+  </div>
+
+</div>
+
+<footer>
+  <div>Orbital elements: NORAD two-line elements (TLE) via CelesTrak · Propagation: SGP4 (satellite.js)</div>
+  <div>Built for orbital pass planning &amp; remote-sensing overpass prediction</div>
+</footer>
+
+<script>
+/* ============================================================
+   ORBITRACK
+   Satellite ground-track, telemetry and pass-prediction tool
+   ============================================================ */
+
+const SATELLITES = [
+  { name: "ISS (ZARYA)", id: 25544 },
+  { name: "Landsat 8",   id: 39084 },
+  { name: "Landsat 9",   id: 49260 },
+  { name: "Sentinel-2A", id: 40697 },
+  { name: "Sentinel-2B", id: 42063 },
+  { name: "Terra",       id: 25994 },
+  { name: "Aqua",        id: 27424 },
+  { name: "NOAA-20",     id: 43013 },
+  { name: "CALIPSO",     id: 29108 }
+];
+
+const DEG = 180 / Math.PI;
+const RAD = Math.PI / 180;
+
+let map, satMarker, trackLine, obsMarker;
+let currentTLE = null;
+let currentSat = null;
+let liveTimer = null;
+let computedPasses = [];
+
+// ---------- Map setup ----------
+function initMap(){
+  map = L.map('map', { worldCopyJump:true, zoomControl:true }).setView([20,0], 2);
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+    attribution: '&copy; OpenStreetMap, &copy; CARTO',
+    subdomains: 'abcd', maxZoom: 8
+  }).addTo(map);
+
+  satMarker = L.circleMarker([0,0], {
+    radius:6, color:'#5EFFB0', fillColor:'#5EFFB0', fillOpacity:1, weight:2
+  }).addTo(map);
+
+  trackLine = L.polyline([], { color:'#5EFFB0', weight:1.5, opacity:0.5 }).addTo(map);
+
+  obsMarker = L.circleMarker(getObserver(), {
+    radius:5, color:'#FFB454', fillColor:'#FFB454', fillOpacity:0.9, weight:2
+  }).addTo(map).bindPopup('Observer');
+}
+
+// ---------- Observer location ----------
+function getObserver(){
+  const preset = document.getElementById('locPreset').value;
+  if(preset === 'powai') return [19.1280, 72.9100];
+  return [
+    parseFloat(document.getElementById('latInput').value) || 0,
+    parseFloat(document.getElementById('lonInput').value) || 0
+  ];
+}
+
+document.getElementById('locPreset').addEventListener('change', (e)=>{
+  document.getElementById('customCoordsField').style.display = e.target.value === 'custom' ? 'block' : 'none';
+  if(obsMarker) obsMarker.setLatLng(getObserver());
+});
+['latInput','lonInput'].forEach(id=>{
+  document.getElementById(id).addEventListener('change', ()=>{
+    if(obsMarker) obsMarker.setLatLng(getObserver());
+  });
+});
+
+// ---------- Satellite selector ----------
+function populateSatSelect(){
+  const sel = document.getElementById('satSelect');
+  SATELLITES.forEach(s=>{
+    const opt = document.createElement('option');
+    opt.value = s.id; opt.textContent = s.name;
+    sel.appendChild(opt);
+  });
+}
+
+// ---------- TLE fetch ----------
+async function fetchTLE(noradId){
+  const url = `https://celestrak.org/NORAD/elements/gp.php?CATNR=${noradId}&FORMAT=TLE`;
+  try{
+    const res = await fetch(url);
+    const text = await res.text();
+    const lines = text.trim().split('\n').map(l=>l.trim());
+    if(lines.length >= 3 && lines[1].startsWith('1 ') && lines[2].startsWith('2 ')){
+      return { name: lines[0], line1: lines[1], line2: lines[2] };
+    }
+    throw new Error('Malformed TLE response');
+  }catch(err){
+    throw err;
+  }
+}
+
+// ---------- Load selected satellite ----------
+async function loadSatellite(){
+  const id = document.getElementById('satSelect').value;
+  document.getElementById('tleAge').textContent = 'TLE epoch: loading…';
+  try{
+    const tle = await fetchTLE(id);
+    currentTLE = tle;
+    currentSat = satellite.twoline2satrec(tle.line1, tle.line2);
+    const epochYear = currentSat.epochyr;
+    const epochDay = currentSat.epochdays;
+    const fullYear = epochYear < 57 ? 2000 + epochYear : 1900 + epochYear;
+    document.getElementById('tleAge').textContent =
+      `TLE epoch: ${fullYear} day ${epochDay.toFixed(2)}`;
+    drawOrbitPath();
+    computedPasses = [];
+    document.getElementById('passContainer').innerHTML =
+      '<div class="empty">Click "Compute passes" to generate pass predictions</div>';
+    clearSkyView();
+  }catch(err){
+    document.getElementById('tleAge').textContent = 'TLE epoch: fetch failed (network/CORS)';
+    document.getElementById('passContainer').innerHTML =
+      '<div class="empty">Could not fetch live TLE data. Check network access to celestrak.org.</div>';
+  }
+}
+
+// ---------- Live position update ----------
+function updateLiveTelemetry(){
+  if(!currentSat) return;
+  const now = new Date();
+  const pv = satellite.propagate(currentSat, now);
+  if(!pv.position) return;
+
+  const gmst = satellite.gstime(now);
+  const geo = satellite.eciToGeodetic(pv.position, gmst);
+
+  const lat = satellite.degreesLat(geo.latitude);
+  const lon = satellite.degreesLong(geo.longitude);
+  const alt = geo.height; // km
+
+  const vel = pv.velocity;
+  const speed = Math.sqrt(vel.x*vel.x + vel.y*vel.y + vel.z*vel.z); // km/s
+
+  // orbital elements
+  const inc = currentSat.inclo * DEG;
+  const ecc = currentSat.ecco;
+  const meanMotion = currentSat.no * (1440/(2*Math.PI)); // rev/day
+  const periodMin = 1440 / meanMotion;
+
+  // range to observer
+  const obs = getObserver();
+  const observerGd = { latitude: obs[0]*RAD, longitude: obs[1]*RAD, height: 0 };
+  const ecf = satellite.eciToEcf(pv.position, gmst);
+  const lookAngles = satellite.ecfToLookAngles(observerGd, ecf);
+  const rangeKm = lookAngles.rangeSat;
+
+  document.getElementById('t-lat').textContent = lat.toFixed(3) + '°';
+  document.getElementById('t-lon').textContent = lon.toFixed(3) + '°';
+  document.getElementById('t-alt').textContent = alt.toFixed(1) + ' km';
+  document.getElementById('t-vel').textContent = speed.toFixed(2) + ' km/s';
+  document.getElementById('t-inc').textContent = inc.toFixed(2) + '°';
+  document.getElementById('t-ecc').textContent = ecc.toFixed(5);
+  document.getElementById('t-period').textContent = periodMin.toFixed(1) + ' min';
+  document.getElementById('t-range').textContent = rangeKm.toFixed(0) + ' km';
+
+  satMarker.setLatLng([lat, lon]);
+}
+
+// ---------- Orbit ground track (one period) ----------
+function drawOrbitPath(){
+  if(!currentSat) return;
+  const now = new Date();
+  const meanMotion = currentSat.no * (1440/(2*Math.PI));
+  const periodMin = 1440 / meanMotion;
+  const steps = 120;
+  const pts = [];
+  let prevLon = null;
+  let segment = [];
+
+  for(let i=0;i<=steps;i++){
+    const t = new Date(now.getTime() + (i/steps)*periodMin*60000);
+    const pv = satellite.propagate(currentSat, t);
+    if(!pv.position) continue;
+    const gmst = satellite.gstime(t);
+    const geo = satellite.eciToGeodetic(pv.position, gmst);
+    const lat = satellite.degreesLat(geo.latitude);
+    const lon = satellite.degreesLong(geo.longitude);
+
+    if(prevLon !== null && Math.abs(lon - prevLon) > 180){
+      pts.push(segment);
+      segment = [];
+    }
+    segment.push([lat, lon]);
+    prevLon = lon;
+  }
+  pts.push(segment);
+
+  trackLine.setLatLngs(pts);
+}
+
+// ---------- UTC clock ----------
+function tickClock(){
+  const now = new Date();
+  document.getElementById('utcClock').textContent = now.toISOString().substr(11,8);
+}
+
+// ============================================================
+//  PASS PREDICTION
+// ============================================================
+function computePasses(){
+  if(!currentSat){
+    document.getElementById('passContainer').innerHTML =
+      '<div class="empty">Satellite not loaded yet</div>';
+    return;
+  }
+
+  const obs = getObserver();
+  const observerGd = { latitude: obs[0]*RAD, longitude: obs[1]*RAD, height: 0 };
+  const minElev = parseFloat(document.getElementById('minElev').value) || 0;
+  const days = parseInt(document.getElementById('forecastDays').value, 10);
+
+  const stepSec = 30; // resolution
+  const totalSec = days * 86400;
+  const startTime = new Date();
+
+  let passes = [];
+  let inPass = false;
+  let passStart = null;
+  let maxElev = -90;
+  let maxElevTime = null;
+  let trackPoints = [];
+
+  for(let s=0; s<=totalSec; s+=stepSec){
+    const t = new Date(startTime.getTime() + s*1000);
+    const pv = satellite.propagate(currentSat, t);
+    if(!pv.position) continue;
+    const gmst = satellite.gstime(t);
+    const ecf = satellite.eciToEcf(pv.position, gmst);
+    const look = satellite.ecfToLookAngles(observerGd, ecf);
+    const elevDeg = look.elevation * DEG;
+    const azDeg = look.azimuth * DEG;
+
+    if(elevDeg > 0){
+      if(!inPass){
+        inPass = true;
+        passStart = t;
+        maxElev = elevDeg;
+        maxElevTime = t;
+        trackPoints = [];
+      }
+      if(elevDeg > maxElev){
+        maxElev = elevDeg;
+        maxElevTime = t;
+      }
+      trackPoints.push({ time:t, az:azDeg, el:elevDeg });
+    } else {
+      if(inPass){
+        inPass = false;
+        const passEnd = t;
+        if(maxElev >= minElev){
+          passes.push({
+            start: passStart,
+            end: passEnd,
+            maxElev: maxElev,
+            maxElevTime: maxElevTime,
+            track: trackPoints
+          });
+        }
+      }
+    }
+  }
+
+  computedPasses = passes;
+  renderPassTable(passes);
+}
+
+function fmtDate(d){
+  return d.toLocaleString('en-GB', {
+    day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit', timeZone:'UTC'
+  }) + ' UTC';
+}
+
+function durationStr(start, end){
+  const secs = Math.round((end - start)/1000);
+  const m = Math.floor(secs/60);
+  const s = secs % 60;
+  return `${m}m ${s}s`;
+}
+
+function qualityTag(elev){
+  if(elev >= 40) return '<span class="quality-tag q-good">GOOD</span>';
+  if(elev >= 20) return '<span class="quality-tag q-fair">FAIR</span>';
+  return '<span class="quality-tag q-poor">LOW</span>';
+}
+
+function renderPassTable(passes){
+  const container = document.getElementById('passContainer');
+  if(passes.length === 0){
+    container.innerHTML = '<div class="empty">No qualifying passes found in this window. Try lowering the minimum elevation or extending the forecast window.</div>';
+    return;
+  }
+
+  let html = `<table class="pass-table"><thead><tr>
+    <th>Rise (UTC)</th><th>Duration</th><th>Max El.</th><th>Quality</th>
+  </tr></thead><tbody>`;
+
+  passes.forEach((p, idx)=>{
+    html += `<tr data-idx="${idx}">
+      <td>${fmtDate(p.start)}</td>
+      <td>${durationStr(p.start, p.end)}</td>
+      <td>${p.maxElev.toFixed(1)}°</td>
+      <td>${qualityTag(p.maxElev)}</td>
+    </tr>`;
+  });
+
+  html += `</tbody></table>`;
+  container.innerHTML = html;
+
+  container.querySelectorAll('tr[data-idx]').forEach(row=>{
+    row.addEventListener('click', ()=>{
+      container.querySelectorAll('tr').forEach(r=>r.classList.remove('active'));
+      row.classList.add('active');
+      const idx = parseInt(row.dataset.idx, 10);
+      drawSkyView(computedPasses[idx]);
+      updatePassDetail(computedPasses[idx]);
+    });
+  });
+
+  // auto-select first pass
+  const firstRow = container.querySelector('tr[data-idx]');
+  if(firstRow) firstRow.click();
+}
+
+function updatePassDetail(pass){
+  const detail = document.getElementById('passDetail');
+  detail.innerHTML = `
+    <div style="color:var(--text);font-weight:600;margin-bottom:6px;">Pass details</div>
+    Rise: ${fmtDate(pass.start)}<br>
+    Set: ${fmtDate(pass.end)}<br>
+    Duration: ${durationStr(pass.start, pass.end)}<br>
+    Max elevation: ${pass.maxElev.toFixed(1)}° at ${fmtDate(pass.maxElevTime)}<br>
+    Track points: ${pass.track.length}
+  `;
+}
+
+// ============================================================
+//  SKY VIEW (polar plot) — signature element
+// ============================================================
+function clearSkyView(){
+  const svg = document.getElementById('skyview');
+  svg.innerHTML = '';
+  drawSkyFrame();
+}
+
+function drawSkyFrame(){
+  const svg = document.getElementById('skyview');
+  const cx = 140, cy = 140, R = 120;
+  let html = '';
+
+  // background circle
+  html += `<circle cx="${cx}" cy="${cy}" r="${R}" fill="#141B2A" stroke="#26324A" stroke-width="1"/>`;
+
+  // elevation rings (every 30°)
+  [30,60].forEach(el=>{
+    const r = R * (1 - el/90);
+    html += `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="#26324A" stroke-width="1" stroke-dasharray="3 3"/>`;
+  });
+
+  // zenith marker
+  html += `<circle cx="${cx}" cy="${cy}" r="2" fill="#8B96A8"/>`;
+
+  // cardinal lines + labels
+  const dirs = [
+    {label:'N', ang:0}, {label:'E', ang:90}, {label:'S', ang:180}, {label:'W', ang:270}
+  ];
+  dirs.forEach(d=>{
+    const rad = (d.ang - 90) * RAD; // rotate so N is up
+    const x2 = cx + R*Math.cos(rad);
+    const y2 = cy + R*Math.sin(rad);
+    html += `<line x1="${cx}" y1="${cy}" x2="${x2}" y2="${y2}" stroke="#26324A" stroke-width="1"/>`;
+    const lx = cx + (R+14)*Math.cos(rad);
+    const ly = cy + (R+14)*Math.sin(rad);
+    html += `<text x="${lx}" y="${ly}" fill="#8B96A8" font-family="IBM Plex Mono" font-size="11" text-anchor="middle" dominant-baseline="middle">${d.label}</text>`;
+  });
+
+  svg.innerHTML = html;
+}
+
+function azElToXY(az, el, cx, cy, R){
+  const r = R * (1 - el/90);
+  const rad = (az - 90) * RAD; // N up, E right
+  const x = cx + r*Math.cos(rad);
+  const y = cy + r*Math.sin(rad);
+  return [x,y];
+}
+
+function drawSkyView(pass){
+  const svg = document.getElementById('skyview');
+  drawSkyFrame();
+  const cx = 140, cy = 140, R = 120;
+
+  let pathPts = pass.track.map(p => azElToXY(p.az, p.el, cx, cy, R));
+  let pathStr = pathPts.map((p,i)=> (i===0?'M':'L') + p[0].toFixed(1) + ' ' + p[1].toFixed(1)).join(' ');
+
+  let html = svg.innerHTML;
+  html += `<path d="${pathStr}" fill="none" stroke="#5EFFB0" stroke-width="2.5" stroke-linecap="round"/>`;
+
+  // rise/set markers
+  const rise = pathPts[0];
+  const set = pathPts[pathPts.length-1];
+  html += `<circle cx="${rise[0]}" cy="${rise[1]}" r="4" fill="#5EFFB0"/>`;
+  html += `<circle cx="${set[0]}" cy="${set[1]}" r="4" fill="#5EFFB0" opacity="0.5"/>`;
+
+  // max elevation marker
+  let maxPt = pathPts[0], maxEl = -90;
+  pass.track.forEach((p,i)=>{ if(p.el > maxEl){ maxEl = p.el; maxPt = pathPts[i]; } });
+  html += `<circle cx="${maxPt[0]}" cy="${maxPt[1]}" r="5" fill="none" stroke="#FFB454" stroke-width="2"/>`;
+
+  // current-time marker if pass is happening now
+  const now = new Date();
+  if(now >= pass.start && now <= pass.end){
+    // find nearest track point
+    let nearest = pathPts[0], minDiff = Infinity;
+    pass.track.forEach((p,i)=>{
+      const diff = Math.abs(p.time - now);
+      if(diff < minDiff){ minDiff = diff; nearest = pathPts[i]; }
+    });
+    html += `<circle cx="${nearest[0]}" cy="${nearest[1]}" r="5" fill="#6FA8FF"/>`;
+  }
+
+  svg.innerHTML = html;
+}
+
+// ============================================================
+//  INIT
+// ============================================================
+populateSatSelect();
+initMap();
+clearSkyView();
+document.getElementById('satSelect').addEventListener('change', loadSatellite);
+document.getElementById('computeBtn').addEventListener('click', computePasses);
+
+loadSatellite();
+setInterval(updateLiveTelemetry, 1000);
+setInterval(tickClock, 1000);
+setInterval(drawOrbitPath, 5*60*1000);
+tickClock();
+</script>
+</body>
+</html>
