@@ -1,0 +1,35 @@
+name: Import Powai Lake source
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  import:
+    runs-on: ubuntu-latest
+    env:
+      VITE_SUPABASE_URL: ${{ vars.VITE_SUPABASE_URL }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download clean source archive
+        run: |
+          mkdir -p /tmp/powai-source
+          TRANSFER_ENDPOINT="${VITE_SUPABASE_URL}/functions/v1/create-github-transfer-url"
+          SIGNED_URL=$(curl -fsSL "$TRANSFER_ENDPOINT" | python3 -c 'import json,sys; print(json.load(sys.stdin)["url"])')
+          curl -fsSL "$SIGNED_URL" -o /tmp/powai-source/source.tar.gz
+          tar -xzf /tmp/powai-source/source.tar.gz -C "$GITHUB_WORKSPACE"
+
+      - name: Save imported source
+        run: |
+          git config user.name "Powai Lake Rejuvenation Forum"
+          git config user.email "noreply@powailake.in"
+          git add .
+          if git diff --cached --quiet; then
+            echo "Source is already up to date"
+            exit 0
+          fi
+          git commit -m "Import Powai Lake Forum website"
+          git push origin main
