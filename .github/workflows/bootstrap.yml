@@ -24,6 +24,7 @@ jobs:
 
       - name: Save imported source
         run: |
+          rm -f .github/workflows/deploy.yml
           git config user.name "Powai Lake Rejuvenation Forum"
           git config user.email "noreply@powailake.in"
           git add .
